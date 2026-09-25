@@ -1,0 +1,10 @@
+.sf/
+.sfdx/
+.localdevserver/
+temp/
+node_modules/
+*.log
+.DS_Store
+.vscode/
+test-results/
+*.agent.bak
