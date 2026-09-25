@@ -54,7 +54,7 @@ flowchart TD
 
 &#x20;   S --> V\["CaseStatusLookup<br/>case number + email"]
 
-```See [docs/DESIGN.md](docs/DESIGN.md) for the partner scenario, design decisions, and trade-offs.
+```
 
 
 
