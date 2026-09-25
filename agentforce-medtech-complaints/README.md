@@ -12,24 +12,49 @@ Consider all instances of device data to be fictional and for demonstration purp
 
 ## Architecture PFD
 
-```mermaid
-flowchart TD
-    U(\\\[Customer]) --> R\\\[agent\\\_router]
-    R --> I\\\[complaint\\\_intake]
-    R --> L\\\[recall\\\_lookup]
-    R --> S\\\[case\\\_status]
-    R --> O\\\[off\\\_topic]
-    I -- "run: AdverseEventScreener" --> D{Potential harm?}
-    D -- no --> C\\\[ComplaintCaseService<br/>Priority: Medium]
-    D -- "yes (after\\\_reasoning)" --> E\\\[adverse\\\_event\\\_escalation]
-    E --> H\\\[ComplaintCaseService<br/>Priority: High, flagged]
-    C --> Q\\\[(Complaint Review queue)]
-    H --> Q
-    L --> F\\\[DeviceRecallLookup] --> API\\\[(openFDA API)]
-    S --> V\\\[CaseStatusLookup<br/>case number + email]
-```
 
-See [docs/DESIGN.md](docs/DESIGN.md) for the partner scenario, design decisions, and trade-offs.
+
+```mermaid
+
+flowchart TD
+
+&#x20;   U(\[Customer]) --> R\[agent\_router]
+
+&#x20;   R --> I\[complaint\_intake]
+
+&#x20;   R --> L\[recall\_lookup]
+
+&#x20;   R --> S\[case\_status]
+
+&#x20;   R --> O\[off\_topic]
+
+
+
+&#x20;   I -- "run: AdverseEventScreener" --> D{Potential harm?}
+
+&#x20;   D -- "no" --> C\["ComplaintCaseService<br/>Priority: Medium"]
+
+&#x20;   D -- "yes (after\_reasoning)" --> E\[adverse\_event\_escalation]
+
+&#x20;   E --> H\["ComplaintCaseService<br/>Priority: High, flagged"]
+
+
+
+&#x20;   C --> Q\[(Complaint Review queue)]
+
+&#x20;   H --> Q
+
+
+
+&#x20;   L --> F\[DeviceRecallLookup]
+
+&#x20;   F --> API\[(openFDA API)]
+
+
+
+&#x20;   S --> V\["CaseStatusLookup<br/>case number + email"]
+
+```See [docs/DESIGN.md](docs/DESIGN.md) for the partner scenario, design decisions, and trade-offs.
 
 
 
@@ -37,7 +62,7 @@ See [docs/DESIGN.md](docs/DESIGN.md) for the partner scenario, design decisions,
 
 |Path|What it is|
 |-|-|
-|`force-app/main/default/aiAuthoringBundles/MedTech\\\_Complaint\\\_Agent/`|The agent, written in Agent Script|
+|`force-app/main/default/aiAuthoringBundles/MedTech\\\\\\\_Complaint\\\\\\\_Agent/`|The agent, written in Agent Script|
 |`force-app/main/default/classes/`|Invocable Apex actions and their tests|
 |`force-app/main/default/objects/Case/fields/`|Complaint fields on Case|
 |`force-app/main/default/queues/`|Complaint Review queue|
@@ -56,13 +81,13 @@ Prerequisites: a [Developer Edition org with Agentforce](https://developer.sales
 ```bash
 sf org login web --alias complaints --set-default
 ./scripts/deploy.sh complaints
-sf agent preview --target-org complaints --api-name MedTech\\\_Complaint\\\_Agent
+sf agent preview --target-org complaints --api-name MedTech\\\\\\\_Complaint\\\\\\\_Agent
 ```
 
 To try the conversation design before deploying anything, preview the Agent Script in simulated mode. The LLM mocks the actions:
 
 ```bash
-sf agent preview --target-org complaints --authoring-bundle MedTech\\\_Complaint\\\_Agent
+sf agent preview --target-org complaints --authoring-bundle MedTech\\\\\\\_Complaint\\\\\\\_Agent
 ```
 
 ## Mock Demo:
