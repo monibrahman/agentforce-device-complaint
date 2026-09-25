@@ -12,48 +12,26 @@ Consider all instances of device data to be fictional and for demonstration purp
 
 ## Architecture PFD
 
-
-
 ```mermaid
-
 flowchart TD
+    U([Customer]) --> R[agent_router]
+    R --> I[complaint_intake]
+    R --> L[recall_lookup]
+    R --> S[case_status]
+    R --> O[off_topic]
 
-&#x20;   U(\[Customer]) --> R\[agent\_router]
+    I -- "run: AdverseEventScreener" --> D{Potential harm?}
+    D -- "no" --> C["ComplaintCaseService - Priority: Medium"]
+    D -- "yes after reasoning" --> E[adverse_event_escalation]
+    E --> H["ComplaintCaseService - Priority: High, flagged"]
 
-&#x20;   R --> I\[complaint\_intake]
+    C --> Q[(Complaint Review queue)]
+    H --> Q
 
-&#x20;   R --> L\[recall\_lookup]
+    L --> F[DeviceRecallLookup]
+    F --> API[(openFDA API)]
 
-&#x20;   R --> S\[case\_status]
-
-&#x20;   R --> O\[off\_topic]
-
-
-
-&#x20;   I -- "run: AdverseEventScreener" --> D{Potential harm?}
-
-&#x20;   D -- "no" --> C\["ComplaintCaseService<br/>Priority: Medium"]
-
-&#x20;   D -- "yes (after\_reasoning)" --> E\[adverse\_event\_escalation]
-
-&#x20;   E --> H\["ComplaintCaseService<br/>Priority: High, flagged"]
-
-
-
-&#x20;   C --> Q\[(Complaint Review queue)]
-
-&#x20;   H --> Q
-
-
-
-&#x20;   L --> F\[DeviceRecallLookup]
-
-&#x20;   F --> API\[(openFDA API)]
-
-
-
-&#x20;   S --> V\["CaseStatusLookup<br/>case number + email"]
-
+    S --> V["CaseStatusLookup - case number and email"]
 ```
 
 
@@ -62,7 +40,7 @@ flowchart TD
 
 |Path|What it is|
 |-|-|
-|`force-app/main/default/aiAuthoringBundles/MedTech\\\\\\\_Complaint\\\\\\\_Agent/`|The agent, written in Agent Script|
+|`force-app/main/default/aiAuthoringBundles/MedTech\\\\\\\\\\\\\\\_Complaint\\\\\\\\\\\\\\\_Agent/`|The agent, written in Agent Script|
 |`force-app/main/default/classes/`|Invocable Apex actions and their tests|
 |`force-app/main/default/objects/Case/fields/`|Complaint fields on Case|
 |`force-app/main/default/queues/`|Complaint Review queue|
@@ -81,13 +59,13 @@ Prerequisites: a [Developer Edition org with Agentforce](https://developer.sales
 ```bash
 sf org login web --alias complaints --set-default
 ./scripts/deploy.sh complaints
-sf agent preview --target-org complaints --api-name MedTech\\\\\\\_Complaint\\\\\\\_Agent
+sf agent preview --target-org complaints --api-name MedTech\\\\\\\\\\\\\\\_Complaint\\\\\\\\\\\\\\\_Agent
 ```
 
 To try the conversation design before deploying anything, preview the Agent Script in simulated mode. The LLM mocks the actions:
 
 ```bash
-sf agent preview --target-org complaints --authoring-bundle MedTech\\\\\\\_Complaint\\\\\\\_Agent
+sf agent preview --target-org complaints --authoring-bundle MedTech\\\\\\\\\\\\\\\_Complaint\\\\\\\\\\\\\\\_Agent
 ```
 
 ## Mock Demo:
