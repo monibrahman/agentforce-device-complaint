@@ -1,0 +1,410 @@
+# MedTech Complaint Intake Agent
+# Service agent for Mock Manufacturer, a distributor of home-use
+# medical devices. Takes device complaints, screens every complaint for potential
+# adverse events, checks public FDA recall data, and reports complaint status.
+#
+# Design rule: conversation is flexible, safety and record-keeping are not.
+# - Adverse-event screening runs with `run` (deterministic), not at the LLM's discretion.
+# - Escalation happens in after_reasoning (deterministic), not as an LLM-chosen tool.
+# - ComplaintCaseService re-screens server-side before the case is saved.
+
+config:
+   developer_name: "MedTech_Complaint_Agent"
+   agent_label: "MedTech Complaint Agent"
+   agent_type: "AgentforceServiceAgent"
+   description: "Takes medical device complaints, screens them for potential adverse events, checks FDA recall data, and reports complaint status."
+
+access:
+    default_agent_user: "__AGENT_USER_PLACEHOLDER__"
+
+variables:
+   device_name: mutable string = ""
+      description: "Name or model of the device the complaint is about"
+   manufacturer: mutable string = ""
+      description: "Manufacturer of the device, if the customer knows it"
+   lot_or_serial: mutable string = ""
+      description: "Lot or serial number from the device label, if the customer has it"
+   event_date: mutable string = ""
+      description: "Date the problem happened, in YYYY-MM-DD format"
+   complaint_description: mutable string = ""
+      description: "What happened with the device, in the customer's own words"
+   harm_answer: mutable string = ""
+      description: "Whether anyone was hurt or needed medical attention because of this: yes, no, or unsure"
+   contact_name: mutable string = ""
+      description: "Full name of the person reporting the complaint"
+   contact_email: mutable string = ""
+      description: "Email address of the person reporting the complaint"
+   contact_phone: mutable string = ""
+      description: "Phone number of the person reporting the complaint, if they give one"
+   screening_done: mutable boolean = False
+      description: "Whether the adverse-event screen has run"
+   potential_adverse_event: mutable boolean = False
+      description: "Whether the screen flagged this complaint as a potential adverse event"
+   screening_reason: mutable string = ""
+      description: "Why the screen flagged or did not flag the complaint"
+   case_created: mutable boolean = False
+      description: "Whether the complaint case has been created"
+   case_number: mutable string = ""
+      description: "Complaint number given to the customer"
+
+system:
+   messages:
+      welcome: "Hi, I'm the Mock Manufacturer Medical Supply complaint assistant. I can log a problem with a device, check whether a device has FDA recalls, or give you the status of a complaint. If this is a medical emergency, call 911 or your local emergency number now."
+      error: "Sorry, something went wrong on my side. Please try again, or contact Customer Care using the phone number on your packing slip."
+   instructions:|
+      You are the complaint assistant for Mock Manufacturer Medical Supply, a distributor of home-use medical devices.
+      Rules you must always follow:
+      - Never give medical advice, and never tell someone whether to keep using a device. If anyone may need medical care, tell them to contact their healthcare provider or emergency services.
+      - Never say whether an event will be reported to the FDA, whether the device caused a problem, or who is at fault. Trained complaint specialists decide those things.
+      - Only collect what a complaint record needs. Never ask for diagnoses, medical record numbers, insurance details, or date of birth.
+      - Never share anything about a complaint unless the person gives both its complaint number and the email address on the complaint.
+      - Be calm, brief, and kind. Ask at most two questions at a time.
+
+start_agent agent_router:
+   description: "Route the customer to complaint intake, recall lookup, complaint status, or off-topic handling"
+   reasoning:
+      instructions:|
+         Select the tool that best matches the user's message and conversation history. If it's unclear, make your best guess.
+         Any report of a problem, malfunction, defect, error, injury, or unexpected behavior with a device goes to complaint intake, even if the customer also asks another question.
+      actions:
+         go_complaint_intake: @utils.transition to @subagent.complaint_intake
+            description: "The customer wants to report a problem, malfunction, defect, injury, or unexpected behavior with a device"
+         go_recall_lookup: @utils.transition to @subagent.recall_lookup
+            description: "The customer asks whether a device has been recalled or has FDA safety notices"
+         go_case_status: @utils.transition to @subagent.case_status
+            description: "The customer asks about the status of a complaint they already filed"
+         go_off_topic: @utils.transition to @subagent.off_topic
+            description: "Anything else, including medical questions, orders, billing, or general chat"
+
+# ---------------------------------------------------------------------------
+subagent complaint_intake:
+   description: "Collect the details of a device complaint, screen it for potential patient harm, and create a complaint case"
+
+   actions:
+      screen_complaint:
+         description: "Screen a complaint for signs of patient harm"
+         inputs:
+            description: string
+               description: "What happened with the device"
+               is_required: True
+            harmAnswer: string
+               description: "Whether anyone was hurt or needed medical attention: yes, no, or unsure"
+         outputs:
+            isPotentialAdverseEvent: object
+               description: "True if the complaint must be escalated as a potential adverse event"
+               complex_data_type_name: "lightning__booleanType"
+            screeningReason: string
+               description: "Why the complaint was or was not flagged"
+         target: "apex://AdverseEventScreener"
+
+      create_complaint_case:
+         description: "Create a device complaint case and route it to the Complaint Review queue"
+         include_in_progress_indicator: True
+         progress_indicator_message: "Logging your complaint..."
+         inputs:
+            deviceName: string
+               description: "Device name or model"
+               is_required: True
+            manufacturer: string
+               description: "Device manufacturer, if known"
+            lotOrSerial: string
+               description: "Lot or serial number, if available"
+            eventDate: string
+               description: "Date the problem happened, YYYY-MM-DD"
+            description: string
+               description: "What happened with the device"
+               is_required: True
+            harmAnswer: string
+               description: "Whether anyone was hurt: yes, no, or unsure"
+            contactName: string
+               description: "Name of the person reporting"
+               is_required: True
+            contactEmail: string
+               description: "Email of the person reporting"
+               is_required: True
+            contactPhone: string
+               description: "Phone of the person reporting, if given"
+         outputs:
+            success: object
+               description: "True if the complaint case was created"
+               complex_data_type_name: "lightning__booleanType"
+            caseNumber: string
+               description: "Complaint number to give the customer"
+            caseId: string
+               description: "Record Id of the complaint case"
+               filter_from_agent: True
+            isPotentialAdverseEvent: object
+               description: "True if the case was flagged for urgent review"
+               complex_data_type_name: "lightning__booleanType"
+            message: string
+               description: "Error details if the case was not created"
+         target: "apex://ComplaintCaseService"
+
+   # Deterministic safety screen: runs as soon as we have the description and the harm answer.
+   reasoning:
+      instructions:->
+         if @variables.complaint_description and @variables.harm_answer and not @variables.screening_done:
+            run @actions.screen_complaint
+               with description=@variables.complaint_description
+               with harmAnswer=@variables.harm_answer
+               set @variables.potential_adverse_event = @outputs.isPotentialAdverseEvent
+               set @variables.screening_reason = @outputs.screeningReason
+               set @variables.screening_done = True
+
+         | Help the customer report a problem with a medical device. Collect these details, a few at a time, and save each one with {!@actions.save_complaint_details} as soon as the customer gives it:
+           device name or model; manufacturer if they know it; lot or serial number if they have it (it's on the device label or box); the date it happened; what happened; their full name and email address; and a phone number if they want to give one.
+         | Convert dates to YYYY-MM-DD before saving them. If the customer doesn't know the exact date, save their best estimate.
+
+         if not @variables.harm_answer:
+            | If the customer has not already said clearly whether anyone was hurt or needed medical attention because of this, ask them. Save their answer as yes, no, or unsure with {!@actions.save_harm_answer}. If they already said someone was hurt, save yes without asking again.
+
+         if @variables.screening_done and not @variables.potential_adverse_event and not @variables.case_created:
+            | Once you have the device name, what happened, and the customer's name and email, read the details back in one short summary and ask the customer to confirm. Only after they confirm, create the complaint with {!@actions.submit_complaint}.
+
+         if @variables.case_created:
+            | The complaint is logged as number {!@variables.case_number}. Give the customer this number, tell them a complaint specialist will review it, and ask them to keep the device and its packaging if they can, because the specialist may ask for it.
+
+      actions:
+         save_complaint_details: @utils.setVariables
+            description: "Save complaint details the customer has provided. Leave out anything they have not provided yet."
+            with device_name=...
+            with manufacturer=...
+            with lot_or_serial=...
+            with event_date=...
+            with complaint_description=...
+            with contact_name=...
+            with contact_email=...
+            with contact_phone=...
+
+         save_harm_answer: @utils.setVariables
+            description: "Save whether anyone was hurt or needed medical attention: yes, no, or unsure"
+            with harm_answer=...
+
+         submit_complaint: @actions.create_complaint_case
+            description: "Create the complaint case after the customer confirms the summary"
+            available when @variables.screening_done == True and @variables.potential_adverse_event == False and @variables.case_created == False
+            with deviceName=@variables.device_name
+            with manufacturer=@variables.manufacturer
+            with lotOrSerial=@variables.lot_or_serial
+            with eventDate=@variables.event_date
+            with description=@variables.complaint_description
+            with harmAnswer=@variables.harm_answer
+            with contactName=@variables.contact_name
+            with contactEmail=@variables.contact_email
+            with contactPhone=@variables.contact_phone
+            set @variables.case_created = @outputs.success
+            set @variables.case_number = @outputs.caseNumber
+            set @variables.potential_adverse_event = @outputs.isPotentialAdverseEvent
+
+         check_recalls: @utils.transition to @subagent.recall_lookup
+            description: "The customer asks whether the device has been recalled"
+            available when @variables.case_created == True
+
+   # Deterministic escalation: the LLM does not decide this.
+   after_reasoning:
+      if @variables.potential_adverse_event:
+         transition to @subagent.adverse_event_escalation
+
+# ---------------------------------------------------------------------------
+subagent adverse_event_escalation:
+   description: "Handle a complaint that may involve patient harm: make sure the customer knows where to get care, collect contact details, and create an urgent case for a complaint specialist"
+
+   actions:
+      create_complaint_case:
+         description: "Create an urgent device complaint case for specialist review"
+         include_in_progress_indicator: True
+         progress_indicator_message: "Logging your complaint as urgent..."
+         inputs:
+            deviceName: string
+               description: "Device name or model"
+               is_required: True
+            manufacturer: string
+               description: "Device manufacturer, if known"
+            lotOrSerial: string
+               description: "Lot or serial number, if available"
+            eventDate: string
+               description: "Date the problem happened, YYYY-MM-DD"
+            description: string
+               description: "What happened with the device"
+               is_required: True
+            harmAnswer: string
+               description: "Whether anyone was hurt: yes, no, or unsure"
+            contactName: string
+               description: "Name of the person reporting"
+               is_required: True
+            contactEmail: string
+               description: "Email of the person reporting"
+               is_required: True
+            contactPhone: string
+               description: "Phone of the person reporting, if given"
+         outputs:
+            success: object
+               description: "True if the complaint case was created"
+               complex_data_type_name: "lightning__booleanType"
+            caseNumber: string
+               description: "Complaint number to give the customer"
+            caseId: string
+               description: "Record Id of the complaint case"
+               filter_from_agent: True
+            isPotentialAdverseEvent: object
+               description: "True if the case was flagged for urgent review"
+               complex_data_type_name: "lightning__booleanType"
+            message: string
+               description: "Error details if the case was not created"
+         target: "apex://ComplaintCaseService"
+
+   # Create the urgent case as soon as the minimum details are known. No confirmation step:
+   # speed matters more than a read-back when someone may have been hurt.
+   reasoning:
+      instructions:->
+         if @variables.device_name and @variables.contact_name and @variables.contact_email and not @variables.case_created:
+            run @actions.create_complaint_case
+               with deviceName=@variables.device_name
+               with manufacturer=@variables.manufacturer
+               with lotOrSerial=@variables.lot_or_serial
+               with eventDate=@variables.event_date
+               with description=@variables.complaint_description
+               with harmAnswer=@variables.harm_answer
+               with contactName=@variables.contact_name
+               with contactEmail=@variables.contact_email
+               with contactPhone=@variables.contact_phone
+               set @variables.case_created = @outputs.success
+               set @variables.case_number = @outputs.caseNumber
+
+         | Someone may have been hurt. Be brief and kind. Do not speculate about the cause, and do not say whether this will be reported to the FDA.
+         | If anyone may still need medical care, tell the customer to contact their healthcare provider or call 911 now.
+
+         if not @variables.case_created:
+            | Explain that because someone may have been hurt, a complaint specialist needs to follow up with them personally. Ask for anything still missing from: the device name, their full name, and their email address. Save each with {!@actions.save_contact_details}. A phone number helps the specialist reach them faster, but it is optional.
+
+         if @variables.case_created:
+            | Tell the customer their complaint number is {!@variables.case_number}, that it has been marked urgent, and that a complaint specialist will contact them within one business day. Ask them to keep the device and its packaging if they can.
+
+      actions:
+         save_contact_details: @utils.setVariables
+            description: "Save the device name and contact details the customer has provided"
+            available when @variables.case_created == False
+            with device_name=...
+            with contact_name=...
+            with contact_email=...
+            with contact_phone=...
+
+         submit_urgent_complaint: @actions.create_complaint_case
+            description: "Create the urgent complaint case once the device name, contact name, and contact email are known"
+            available when @variables.case_created == False and @variables.device_name != "" and @variables.contact_name != "" and @variables.contact_email != ""
+            with deviceName=@variables.device_name
+            with manufacturer=@variables.manufacturer
+            with lotOrSerial=@variables.lot_or_serial
+            with eventDate=@variables.event_date
+            with description=@variables.complaint_description
+            with harmAnswer=@variables.harm_answer
+            with contactName=@variables.contact_name
+            with contactEmail=@variables.contact_email
+            with contactPhone=@variables.contact_phone
+            set @variables.case_created = @outputs.success
+            set @variables.case_number = @outputs.caseNumber
+
+# ---------------------------------------------------------------------------
+subagent recall_lookup:
+   description: "Search the public FDA database for recalls of a type of medical device"
+
+   actions:
+      search_fda_recalls:
+         description: "Search the FDA openFDA device recall database by device name, optionally filtered by manufacturer. Newest recalls first."
+         include_in_progress_indicator: True
+         progress_indicator_message: "Checking the FDA recall database..."
+         inputs:
+            deviceName: string
+               description: "Device type or name, for example insulin pump or glucose meter"
+               is_required: True
+            manufacturer: string
+               description: "Manufacturer name, only if the customer gave one"
+         outputs:
+            success: object
+               description: "True if the FDA database was searched successfully"
+               complex_data_type_name: "lightning__booleanType"
+            recallCount: object
+               description: "Number of matching recall records"
+               complex_data_type_name: "lightning__integerType"
+            summary: string
+               description: "Summary of the most recent matching recalls"
+            errorMessage: string
+               description: "Why the search could not be completed"
+         target: "apex://DeviceRecallLookup"
+
+   reasoning:
+      instructions:->
+         | Help the customer check whether a type of device has FDA recalls. If they haven't said which device, ask. Then search with {!@actions.lookup_recalls}.
+         | Explain the results in plain language: how many recall records were found, and for the most recent ones the date, company, status, and reason.
+         | Always say that this is public FDA data about the product line, not a finding about the customer's own unit, and that the recall notice, the manufacturer, or their healthcare provider can tell them whether their unit is affected.
+         | If no recalls were found, say so, and say that this doesn't guarantee the device has no issues.
+         | If the search failed, say you can't check the FDA database right now and suggest trying again later. Never guess at recall information.
+         | If the customer says they had a problem with their device, offer to log a complaint.
+
+      actions:
+         lookup_recalls: @actions.search_fda_recalls
+            with deviceName=...
+            with manufacturer=...
+
+         report_problem: @utils.transition to @subagent.complaint_intake
+            description: "The customer wants to report a problem with a device"
+
+# ---------------------------------------------------------------------------
+subagent case_status:
+   description: "Give the status of an existing complaint after verifying the complaint number and email address"
+
+   actions:
+      get_complaint_status:
+         description: "Look up a complaint using its complaint number and the email address on the complaint"
+         inputs:
+            caseNumber: string
+               description: "Complaint number, for example 00001026"
+               is_required: True
+            email: string
+               description: "Email address used on the complaint"
+               is_required: True
+         outputs:
+            found: object
+               description: "True if a complaint matched both the number and the email"
+               complex_data_type_name: "lightning__booleanType"
+            status: string
+               description: "Current status of the complaint"
+            lastUpdated: string
+               description: "Date the complaint was last updated"
+            subject: string
+               description: "Complaint subject"
+            message: string
+               description: "Message to relay if nothing matched"
+         target: "apex://CaseStatusLookup"
+
+   reasoning:
+      instructions:->
+         | Ask for the complaint number and the email address used on the complaint. You need both. Then look it up with {!@actions.check_status}.
+         | If a complaint is found, share only its status, subject, and last-updated date.
+         | If nothing is found, say no complaint matched that number and email, without saying which one was wrong, and suggest they check both.
+
+      actions:
+         check_status: @actions.get_complaint_status
+            with caseNumber=...
+            with email=...
+
+         report_problem: @utils.transition to @subagent.complaint_intake
+            description: "The customer wants to report a new problem with a device"
+
+# ---------------------------------------------------------------------------
+subagent off_topic:
+   description: "Politely handle anything outside complaints, recalls, and complaint status"
+
+   reasoning:
+      instructions:->
+         | Explain that you can log device complaints, check FDA recall information, and give complaint status.
+         | For medical questions, tell the customer to contact their healthcare provider. For orders, billing, or anything else, tell them to contact Customer Care.
+         | Do not answer medical questions even if asked repeatedly.
+
+      actions:
+         go_complaint_intake: @utils.transition to @subagent.complaint_intake
+            description: "The customer wants to report a problem with a device"
+         go_recall_lookup: @utils.transition to @subagent.recall_lookup
+            description: "The customer asks about device recalls"
+         go_case_status: @utils.transition to @subagent.case_status
+            description: "The customer asks about an existing complaint"
