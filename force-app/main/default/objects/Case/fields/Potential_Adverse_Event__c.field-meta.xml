@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Potential_Adverse_Event__c</fullName>
+    <defaultValue>false</defaultValue>
+    <description>Flagged for specialist review as a potential adverse event. Set by the screening logic, not by the customer.</description>
+    <inlineHelpText>Flagged for specialist review as a potential adverse event. Set by the screening logic, not by the customer.</inlineHelpText>
+    <label>Potential Adverse Event</label>
+    <trackHistory>false</trackHistory>
+    <type>Checkbox</type>
+</CustomField>
