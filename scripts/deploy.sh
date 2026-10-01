@@ -49,7 +49,8 @@ sf agent validate authoring-bundle --target-org "$ORG" --api-name "$BUNDLE"
 sf agent publish authoring-bundle --target-org "$ORG" --api-name "$BUNDLE" --skip-retrieve
 
 echo "==> 6/6 Activating the agent"
-sf agent activate --target-org "$ORG" --api-name "$BUNDLE"
+# --json makes activate pick the latest version instead of prompting (the prompt hangs a script).
+sf agent activate --target-org "$ORG" --api-name "$BUNDLE" --json
 
 echo
 echo "Done. Try it:"

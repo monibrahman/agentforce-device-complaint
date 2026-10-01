@@ -68,7 +68,8 @@ finally {
 }
 
 Write-Host "==> 6/6 Activating the agent"
-Invoke-Sf @("agent", "activate", "--target-org", $Org, "--api-name", $Bundle)
+# --json makes activate pick the latest version instead of prompting (the prompt hangs a script).
+Invoke-Sf @("agent", "activate", "--target-org", $Org, "--api-name", $Bundle, "--json")
 
 Write-Host ""
 Write-Host "Done. Try it:"
