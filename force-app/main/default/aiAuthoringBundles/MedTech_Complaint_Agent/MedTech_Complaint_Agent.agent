@@ -46,6 +46,8 @@ variables:
       description: "Whether the complaint case has been created"
    case_number: mutable string = ""
       description: "Complaint number given to the customer"
+   open_gate: mutable string = ""
+      description: "Subagent the router must send the next message to, without asking the LLM. Set while a complaint is in progress; cleared once the case exists."
 
 system:
    messages:
@@ -58,14 +60,24 @@ system:
       - Never say whether an event will be reported to the FDA, whether the device caused a problem, or who is at fault. Trained complaint specialists decide those things.
       - Only collect what a complaint record needs. Never ask for diagnoses, medical record numbers, insurance details, or date of birth.
       - Never share anything about a complaint unless the person gives both its complaint number and the email address on the complaint.
+      - Never say a complaint has been recorded, logged, submitted, or passed to a specialist unless you have given the customer its complaint number in this conversation. Until then, say you are still collecting the details.
       - Be calm, brief, and kind. Ask at most two questions at a time.
 
 start_agent agent_router:
    description: "Route the customer to complaint intake, recall lookup, complaint status, or off-topic handling"
    reasoning:
-      instructions:|
-         Select the tool that best matches the user's message and conversation history. If it's unclear, make your best guess.
-         Any report of a problem, malfunction, defect, error, injury, or unexpected behavior with a device goes to complaint intake, even if the customer also asks another question.
+      # Deterministic continuity (Open Gate pattern): a complaint that is not yet saved goes back to
+      # its subagent before the LLM reasons. Live test 1 lost a complaint because the router LLM
+      # answered a follow-up message itself instead of routing it.
+      instructions:->
+         if @variables.open_gate == "complaint_intake":
+            transition to @subagent.complaint_intake
+         if @variables.open_gate == "adverse_event_escalation":
+            transition to @subagent.adverse_event_escalation
+
+         | Always call exactly one tool. Never answer the customer yourself.
+         | Select the tool that best matches the user's message and conversation history. If it's unclear, make your best guess.
+         | Any report of a problem, malfunction, defect, error, injury, or unexpected behavior with a device goes to complaint intake, even if the customer also asks another question.
       actions:
          go_complaint_intake: @utils.transition to @subagent.complaint_intake
             description: "The customer wants to report a problem, malfunction, defect, injury, or unexpected behavior with a device"
@@ -143,6 +155,10 @@ subagent complaint_intake:
    # Deterministic safety screen: runs as soon as we have the description and the harm answer.
    reasoning:
       instructions:->
+         # Keep the customer here until the case exists, whatever the next message sounds like.
+         if not @variables.case_created:
+            set @variables.open_gate = "complaint_intake"
+
          if @variables.complaint_description and @variables.harm_answer and not @variables.screening_done:
             run @actions.screen_complaint
                with description=@variables.complaint_description
@@ -151,12 +167,14 @@ subagent complaint_intake:
                set @variables.screening_reason = @outputs.screeningReason
                set @variables.screening_done = True
 
-         | Help the customer report a problem with a medical device. Collect these details, a few at a time, and save each one with {!@actions.save_complaint_details} as soon as the customer gives it:
-           device name or model; manufacturer if they know it; lot or serial number if they have it (it's on the device label or box); the date it happened; what happened; their full name and email address; and a phone number if they want to give one.
-         | Convert dates to YYYY-MM-DD before saving them. If the customer doesn't know the exact date, save their best estimate.
+         | Help the customer report a problem with a medical device.
+         | You MUST call {!@actions.save_complaint_details} before you reply, with every complaint detail in the customer's latest message. Any mention of the device or of what went wrong counts, even if it is brief. Never ask a question before saving what the customer has already told you.
+         | The details are: device name or model; manufacturer if they know it; lot or serial number if they have it (it's on the device label or box); the date it happened; what happened; their full name and email address; and a phone number if they want to give one.
+         | Convert dates to YYYY-MM-DD before saving them, using today's date for relative dates like "this Monday". If the customer doesn't know the exact date, save their best estimate.
+         | Ask at most two questions in a message, and only for details that are still missing.
 
          if not @variables.harm_answer:
-            | If the customer has not already said clearly whether anyone was hurt or needed medical attention because of this, ask them. Save their answer as yes, no, or unsure with {!@actions.save_harm_answer}. If they already said someone was hurt, save yes without asking again.
+            | If the customer has already said whether anyone was hurt or needed medical attention because of this, save it right away with {!@actions.save_harm_answer} as yes, no, or unsure. If they said someone was hurt, save yes without asking again. If they haven't said, ask this before any other question.
 
          if @variables.screening_done and not @variables.potential_adverse_event and not @variables.case_created:
             | Once you have the device name, what happened, and the customer's name and email, read the details back in one short summary and ask the customer to confirm. Only after they confirm, create the complaint with {!@actions.submit_complaint}.
@@ -201,7 +219,12 @@ subagent complaint_intake:
             available when @variables.case_created == True
 
    # Deterministic escalation: the LLM does not decide this.
+   # The gate follows the complaint: to escalation if flagged, cleared once the case exists.
    after_reasoning:
+      if @variables.case_created:
+         set @variables.open_gate = ""
+      if @variables.potential_adverse_event and not @variables.case_created:
+         set @variables.open_gate = "adverse_event_escalation"
       if @variables.potential_adverse_event:
          transition to @subagent.adverse_event_escalation
 
@@ -257,6 +280,10 @@ subagent adverse_event_escalation:
    # speed matters more than a read-back when someone may have been hurt.
    reasoning:
       instructions:->
+         # Keep the customer here until the urgent case exists.
+         if not @variables.case_created:
+            set @variables.open_gate = "adverse_event_escalation"
+
          if @variables.device_name and @variables.contact_name and @variables.contact_email and not @variables.case_created:
             run @actions.create_complaint_case
                with deviceName=@variables.device_name
@@ -303,6 +330,10 @@ subagent adverse_event_escalation:
             with contactPhone=@variables.contact_phone
             set @variables.case_created = @outputs.success
             set @variables.case_number = @outputs.caseNumber
+
+   after_reasoning:
+      if @variables.case_created:
+         set @variables.open_gate = ""
 
 # ---------------------------------------------------------------------------
 subagent recall_lookup:

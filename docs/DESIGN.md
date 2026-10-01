@@ -56,7 +56,10 @@ The agent asks only for what a complaint record needs: device, lot or serial, ev
 **6. Every complaint goes to a queue.**
 All cases go to the `Complaint Review` queue. Potential adverse events get `Priority = High` and `Potential_Adverse_Event__c = true`, so specialists can sort by urgency.
 
-**7. The external API fails soft.**
+**7. An unfinished complaint always goes back to its subagent.**
+Every customer message starts at the router. If the router's LLM decides where a follow-up goes, it can misread "it's acme, lot 4471" as small talk and answer it itself, and then the screening and case creation never run (this happened in live test 1; see the build log). So `complaint_intake` and `adverse_event_escalation` set an `open_gate` variable, and the router checks it with a conditional `transition to` before its LLM reasons. The gate clears once the case exists. Trade-off: while a complaint is open, the customer can't jump to a recall check or status lookup mid-intake. The intake LLM can still answer and steer back, and finishing the record comes first.
+
+**8. The external API fails soft.**
 If openFDA is slow or down, `DeviceRecallLookup` returns `success = false` with a plain message. The agent says it can't check right now rather than guessing. "No matches" (openFDA returns HTTP 404) is treated as a valid answer of zero recalls, not an error.
 
 ## Data model
