@@ -303,16 +303,21 @@ subagent adverse_event_escalation:
          | If anyone may still need medical care, tell the customer to contact their healthcare provider or call 911 now.
 
          if not @variables.case_created:
-            | Explain that because someone may have been hurt, a complaint specialist needs to follow up with them personally. Ask for anything still missing from: the device name, their full name, and their email address. Save each with {!@actions.save_contact_details}. A phone number helps the specialist reach them faster, but it is optional.
+            | Explain that because someone may have been hurt, a complaint specialist needs to follow up with them personally. Ask for anything still missing from: the device name, their full name, and their email address. In the same message, ask them to include the manufacturer, the lot or serial number (on the device label or box), and when it happened, if they know them. These are optional; never hold up the complaint for them. A phone number helps the specialist reach them faster, but it is also optional.
+            | You MUST call {!@actions.save_escalation_details} before you reply, with every detail in the customer's latest message. Only save what the customer actually said. Convert dates to YYYY-MM-DD, working out relative dates like "last night" from today's date.
 
          if @variables.case_created:
             | Tell the customer their complaint number is {!@variables.case_number}, that it has been marked urgent, and that a complaint specialist will contact them within one business day. Ask them to keep the device and its packaging if they can.
+            | If the customer gives more details after the complaint is logged, thank them and say the complaint specialist will collect them when they follow up. Don't say the details were added to the complaint.
 
       actions:
-         save_contact_details: @utils.setVariables
-            description: "Save the device name and contact details the customer has provided"
+         save_escalation_details: @utils.setVariables
+            description: "Save the device details and contact details the customer has provided. Leave out anything they have not provided."
             available when @variables.case_created == False
             with device_name=...
+            with manufacturer=...
+            with lot_or_serial=...
+            with event_date=...
             with contact_name=...
             with contact_email=...
             with contact_phone=...
