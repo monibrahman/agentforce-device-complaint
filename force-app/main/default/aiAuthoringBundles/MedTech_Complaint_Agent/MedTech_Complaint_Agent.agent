@@ -170,7 +170,8 @@ subagent complaint_intake:
          | Help the customer report a problem with a medical device.
          | You MUST call {!@actions.save_complaint_details} before you reply, with every complaint detail in the customer's latest message. Any mention of the device or of what went wrong counts, even if it is brief. Never ask a question before saving what the customer has already told you.
          | The details are: device name or model; manufacturer if they know it; lot or serial number if they have it (it's on the device label or box); the date it happened; what happened; their full name and email address; and a phone number if they want to give one.
-         | Convert dates to YYYY-MM-DD before saving them, using today's date for relative dates like "this Monday". If the customer doesn't know the exact date, save their best estimate.
+         | Only save a detail the customer actually said. Never fill one in yourself, and never use today's date unless the customer said it happened today.
+         | Convert dates the customer gives to YYYY-MM-DD before saving them, working out relative dates like "this Monday" from today's date. If the customer gives a rough date, such as "last week", save their best estimate. If they haven't said when it happened, leave the date out and ask.
          | Ask at most two questions in a message, and only for details that are still missing.
 
          if not @variables.harm_answer:
